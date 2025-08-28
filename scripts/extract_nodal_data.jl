@@ -1,10 +1,12 @@
 #=
-Code extracts nodal lines only; see the example of images 
+Code extracts nodal lines only from the nodal surface; see the example of images.
+Input images are assumed to use red and blue channels to distinguish regions.
+Nodal points are places where red > blue in one pixel, and the opposite in a neighbour.
 =#
 using FileIO, Images, ImageTransformations, Colors
 using CSV, DataFrames
 
-img_dir = raw"path_to_img\Fractal_surface_img"  # ← replace this with your actual image directory
+img_dir = raw"path_to_img\Fractal_surface_img"  # ← replace with actual image directory
 output_csv = "nodal_points_output.csv"
 
 # extracts alpha from file name 
@@ -16,19 +18,21 @@ end
 # loads mask and extracts nodal points 
 function extract_nodal_points(filename, α)
     img = load(filename)
-    img_resized = imresize(img, (50, 50))  # resize may not be necessary, change at your discretion
+    img_resized = imresize(img, (50, 50))  # resize not be necessary, change at your discretion
     img_array = channelview(img_resized)  # shape: C x H x W
 
     H, W = size(img_array, 2), size(img_array, 3)
     red = img_array[1, :, :]
     blue = img_array[3, :, :]
-
+    # Create a binary mask: 1.0 if red > blue, else 0.0
     mask = map((r, b) -> r > b ? 1.0f0 : 0.0f0, red, blue)
 
     nodal_pts = []
+    #Loop through interior pixels
     for i in 2:H-1, j in 2:W-1
         center = mask[i, j]
         neighbors = (mask[i+1,j], mask[i-1,j], mask[i,j+1], mask[i,j-1])
+        # If any neighbour has a different mask value → nodal transition
         if any(n != center for n in neighbors)
             x = i / H
             y = j / W
