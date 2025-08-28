@@ -1,17 +1,18 @@
-## NN created to learn nodal structure (using MSE Loss)
+## Neural network to learn image structure conditioned on alpha using MSE loss
 using CUDA, cuDNN, Lux, Zygote, Optimisers, Random, FileIO, Images, Functors, ColorTypes, Printf
 using Plots
+# I also did phased traning, a set of epochs with different learning rates 
+# Later I do a decaying learning rate 
+CUDA.allowscalar(false) # NEEDED 
 
-CUDA.allowscalar(false)
-
-# Correctly permutes image dimensions to HxWxC before flattening
+# Loads images 
 function load_img(filename)
     img = load(filename)
     img_array_chw = channelview(img) # C x H x W
     img_array_hwc = permutedims(img_array_chw, (2, 3, 1))
     return vec(Float32.(img_array_hwc))
 end
-
+# Extract alpha from file names like "img_a0.75.png", this is my naming convention for images 
 function extract_alpha(fname::String)
     m = match(r"_a([0-9]+(?:\.[0-9]+)?)\.png$", fname)
     return m === nothing ? 0.0f0 : parse(Float32, m.captures[1])
@@ -24,7 +25,7 @@ n = length(img_files)
 
 sample_vec = load_img(joinpath(img_dir, img_files[1]))
 n_image = length(sample_vec)
-H, W = 50, 50
+H, W = 50, 50 # Or whatever the dimentions of your image are
 
 X_cpu = Array{Float32}(undef, n_image, n)
 alpha_cpu = Array{Float32}(undef, 1, n)
@@ -36,7 +37,7 @@ end
 const latent_dim = 256
 const n_in = latent_dim + 1
 
-# Using the powerful decoder architecture with leakyrelu
+# Using the powerful decoder architecture with leakyrelu as our activation function 
 model = Chain(
     Dense(n_in => 2048),
     BatchNorm(2048),
@@ -58,7 +59,7 @@ model = Chain(
     BatchNorm(12288),
     x -> leakyrelu.(x, 0.01f0),
 
-    Dense(12288 => 12288), # extra layer at max width
+    Dense(12288 => 12288), 
     BatchNorm(12288),
     x -> leakyrelu.(x, 0.01f0),
 
@@ -78,7 +79,7 @@ st = fmap(cu, st)
 flat_ps, re = Optimisers.destructure(ps)
 flat_ps = cu(flat_ps)
 
-# --- MSE loss function ---
+# # MSE loss between predicted and ground truth images
 function loss_fn_deterministic(p, z)
     global st
     current_ps = re(p)
@@ -87,7 +88,7 @@ function loss_fn_deterministic(p, z)
     return sum(abs2, ŷ .- X) / n
 end
 
-# --- Manual Training Loop ---
+# Traning 
 loss_history = Float32[]
 callback = function (p, l)
     push!(loss_history, l)
@@ -97,8 +98,8 @@ callback = function (p, l)
     return false
 end
 
-# --- PHASE 1: Initial Training ---
-println("--- Starting Phase 1 with MSE Loss (LR: 1e-3) ---")
+# Phase 1
+println("Training with learning rate of 1e-3")
 opt1 = ADAM(1e-3)
 opt_state1 = Optimisers.setup(opt1, flat_ps)
 
@@ -110,8 +111,8 @@ for i in 1:5000
     callback(flat_ps, loss)
 end
 
-# --- PHASE 2: Fine-tuning ---
-println("--- Starting Phase 2 for Fine-Tuning (LR: 1e-5) ---")
+# Phase 2-
+println("Training with learning rate of 1e-5")
 opt2 = ADAM(1e-5)
 opt_state2 = Optimisers.setup(opt2, flat_ps)
 
@@ -122,20 +123,21 @@ for i in 1:5000
     opt_state2, flat_ps = Optimisers.update!(opt_state2, flat_ps, grads[1])
     callback(flat_ps, loss)
 end
-println("Training finished.")
+println("Training finished")
 
 
-# Plotting and Inference
+# Plotting loss function 
 plot(loss_history, xlabel="Iteration", ylabel="Loss", title="Training Loss Over Time (MSE)", label="Loss", yaxis=:log10)
 savefig("training_loss_plot_extra.png")
 
-println("Generating sequence of images...")
+println("Generating img")
 ps_trained = re(flat_ps)
 output_dir = "generated_sequence_low_loss_extra"
 mkpath(output_dir)
 st_inference = Lux.testmode(st)
 z_test = CUDA.randn(Float32, latent_dim, 1)
 
+# loop to produce images witrh different alpha values 
 for α_val in 0.0f0:0.05f0:1.2f0
     z_cond_test = vcat(z_test, fill(α_val, 1, 1))
     ŷ, _ = model(z_cond_test, ps_trained, st_inference)
