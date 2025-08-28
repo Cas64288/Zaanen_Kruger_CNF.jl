@@ -1,26 +1,22 @@
-"""
-Code extracts 
-
-"""
-
-
+#=
+Code extracts nodal lines only; see the example of images 
+=#
 using FileIO, Images, ImageTransformations, Colors
 using CSV, DataFrames
 
-# ========== Configuration ==========
-img_dir = raw"C:\Users\linkd\Downloads\UROP_2025\Astowell.jl-main\Astowell.jl-main\notebooks\Fractal_surface_img"  # ← replace this with your actual image directory
-output_csv = "nodal_points_high_res.csv"
+img_dir = raw"path_to_img\Fractal_surface_img"  # ← replace this with your actual image directory
+output_csv = "nodal_points_output.csv"
 
-# ========== Helper: Extract α from filename ==========
+# extracts alpha from file name 
 function extract_alpha(fname::String)
     m = match(r"_a([0-9.]+)\.png$", fname)
     return m === nothing ? 0.0f0 : parse(Float32, m.captures[1])
 end
 
-# ========== Helper: Load mask & extract nodal points ==========
+# loads mask and extracts nodal points 
 function extract_nodal_points(filename, α)
     img = load(filename)
-    img_resized = imresize(img, (50, 50))  # resize for consistency
+    img_resized = imresize(img, (50, 50))  # resize may not be necessary, change at your discretion
     img_array = channelview(img_resized)  # shape: C x H x W
 
     H, W = size(img_array, 2), size(img_array, 3)
@@ -43,7 +39,6 @@ function extract_nodal_points(filename, α)
     return nodal_pts
 end
 
-# ========== Main Script ==========
 all_nodal_data = []
 
 for file in readdir(img_dir)
@@ -62,4 +57,4 @@ for (x, y, α) in all_nodal_data
 end
 
 CSV.write(output_csv, df)
-println("Saved nodal points to: $output_csv")
+println("Saved/$output_csv")
