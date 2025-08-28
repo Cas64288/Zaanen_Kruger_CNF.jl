@@ -148,4 +148,4 @@ for α_val in 0.0f0:0.05f0:1.2f0
     save_name = @sprintf "alpha_%.2f.png" α_val
     save(joinpath(output_dir, save_name), ŷ_image)
 end
-println("Generated image sequence saved to '$(output_dir)' directory.")
+println("Saved/'$(output_dir)'")
