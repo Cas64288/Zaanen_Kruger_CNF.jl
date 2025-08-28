@@ -1,4 +1,4 @@
-# --- 1. SETUP FOR GENERATION ---
+# Code is meant to be ran after using Testing_cnf.jl
 using Logging, TerminalLoggers
 global_logger(TerminalLogger())
 
@@ -10,7 +10,7 @@ using Images, FileIO, JLD2, MLUtils
 const cpu_dev = cpu_device()
 const gpu_dev = gpu_device()
 
-# --- 2. LOAD MODEL AND METADATA ---
+# Loading model and data 
 @info "Loading model..."
 jld_data = jldopen(raw"C:/Users/casan/Downloads/UROP_2025/model_cnn_epoch_100.jld2", "r")
 ps_loaded = jld_data["ps"]
@@ -22,14 +22,14 @@ data_mean = jld_data["data_mean"]
 data_std = jld_data["data_std"]
 close(jld_data)
 
-# --- 3. RE-DEFINE MODEL STRUCTURE ---
-# This must perfectly match the model that was saved
+#  RE-DEFINE MODEL STRUCTURE 
+# Parameters must match those used to make the model in Testing_cnf.jl
 nvars = H * W * C
 nconds = 1
 naugs = 0
 n_in = nvars + naugs
 
-@assert H % 4 == 0 && W % 4 == 0 "Image dimensions must be divisible by 4 for this CNN."
+# NOTE: "Image dimensions must be divisible by 4 for this CNN."
 hidden_dim = 64
 start_H, start_W = H ÷ 4, W ÷ 4
 
@@ -46,7 +46,7 @@ function ResBlock(channels)
         +
     )
 end
-
+# VERY IMPORTANT: nn chain, Resblock and icnf function must be the same as the ones in Testing_cnf.jl
 nn = Chain(
     Dense(n_in + nconds => start_H * start_W * hidden_dim),
     Lux.WrappedFunction(x -> reshape(x, start_H, start_W, hidden_dim, size(x, 2))),
@@ -70,7 +70,8 @@ icnf = construct(
     sol_kwargs = (; save_everystep = false, alg = VCABM(), sensealg = BacksolveAdjoint(; autojacvec = ZygoteVJP())),
 )
 
-# --- 4. GENERATION FUNCTION (Definitive Version) ---
+# GENERATION FUNCTION 
+# Code is ran on cpu ()
 function generate_images(ps_trained, st_trained, alpha_val)
     # Move model components to the CPU for the solve
     ps_cpu = cpu_device()(ps_trained)
@@ -124,4 +125,4 @@ for alpha in 0.0:0.1:1.0
     img = generate_images(ps_gpu, st_gpu, alpha)
     save(joinpath(output_dir, "alpha_$(alpha).png"), img)
 end
-@info "Image sequence saved to '$output_dir'"
+@info "Imag saved/'$output_dir'"
