@@ -4,7 +4,7 @@ global_logger(TerminalLogger())
 
 using ContinuousNormalizingFlows, Lux, OrdinaryDiffEq
 using LuxCUDA, CUDA, cuDNN
-using ComponentArrays, Distributions, Random, SciMLBase
+using ComponentArrays, Distributions, Random, SciMLBase, SciMLSensitivity
 using Images, FileIO, JLD2, MLUtils
 
 const cpu_dev = cpu_device()
@@ -65,7 +65,7 @@ icnf = construct(
     nvars,
     naugs;
     compute_mode = LuxVecJacMatrixMode(AutoZygote()),
-    device = gdev,
+    device = gpu_dev,
     tspan = (0.0f0, 1.0f0),
     sol_kwargs = (; save_everystep = false, alg = VCABM(), sensealg = BacksolveAdjoint(; autojacvec = ZygoteVJP())),
 )
