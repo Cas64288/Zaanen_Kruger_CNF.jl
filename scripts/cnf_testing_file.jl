@@ -1,3 +1,4 @@
+# OLD CODE
 using cuDNN
 using CUDA; CUDA.device!(0)
 
