@@ -1,4 +1,13 @@
-# --- 1. SETUP ---
+""" Defining red as Ψ > 0 and blue as Ψ <  0 (I think), Yellow dots are fixed particle positions
+ and nodes are colour transition between red and blue, this code will be used with 2D data"""
+ 
+""" Code adapted from GitHub (ContinuousNormalizingFlows.jl) https://github.com/impICNF/ContinuousNormalizingFlows.jl"""
+#The following code is an attempt to learn the nodal structure 
+# Simulating fermionic wavefunctions that experience backflow, we have seen that they 
+# experience fractal-like nodal surfaces as the backflow strength characterised by α (alpha)
+# objective is to use machine learning to reproduce the shape of and evolution of the nodal surface from
+# raw simulations and or visual representations 
+# Make a note to edit the code. I want the neural network to detect blue or red as they denote positive/ and negative regions 
 using Logging, TerminalLoggers, Statistics
 global_logger(TerminalLogger())
 
@@ -9,18 +18,21 @@ using Images, FileIO, JLD2
 using ParameterSchedulers
 using ImageTransformations
 
-CUDA.allowscalar(false)
+CUDA.allowscalar(false) # NEEDED 
 gdev = gpu_device()
 cpu_dev = cpu_device()
 
-# --- 2. DATA LOADING & AUGMENTATION SETUP ---
+# Loading data/Augmentation 
+# Load and crop image to target size (centre crop)
+#This is only needed if the dimensions of your image are not divisible by 4 
+# Requirement for the data augmentation later 
 function load_and_crop_image(filename; target_size=(48, 48))
     img = load(filename)
     h_start = (size(img, 1) - target_size[1]) ÷ 2 + 1
     w_start = (size(img, 2) - target_size[2]) ÷ 2 + 1
     return img[h_start:(h_start + target_size[1] - 1), w_start:(w_start + target_size[2] - 1)]
 end
-
+# Extract alpha from file names like "img_a0.75.png", this is my naming convention for images 
 function extract_alpha(fname::String)
     m = match(r"_a([0-9]+(?:\.[0-9]+)?)\.png$", fname)
     return m === nothing ? 0.0f0 : parse(Float32, m.captures[1])
@@ -37,7 +49,7 @@ H, W = size(sample_img)
 C = size(channelview(sample_img), 1)
 n_image = H * W * C
 
-# --- NORMALIZATION (Calculated once) ---
+# Normalises data 
 X_for_norm = Array{Float32}(undef, n_image, n)
 for (i, fname) in enumerate(img_files)
     img_obj = load_and_crop_image(joinpath(img_dir, fname))
@@ -47,17 +59,18 @@ end
 data_mean = mean(X_for_norm)
 data_std = std(X_for_norm)
 
-# --- 3. MODEL DEFINITION ---
-nvars = n_image
-nconds = 1
-naugs = 0
+# Defining the model 
+nvars = n_image  # number of variables (image pixels)
+nconds = 1       # conditioning variable: alpha
+naugs = 0         # no augmentations (I'm not sure what this means)
 n_in = nvars + naugs
 
-@assert H % 4 == 0 && W % 4 == 0 "Image dimensions must be divisible by 4 for this CNN."
+# IMPORTANT "Image dimensions must be divisible by 4 for this CNN."
 hidden_dim = 64
 start_H, start_W = H ÷ 4, W ÷ 4
 
-# Define a reusable Residual Block
+# Residual Block Structure: norm → activation → conv → norm → activation + skip
+
 function ResBlock(channels)
     return SkipConnection(
         Chain(
@@ -94,11 +107,12 @@ icnf = construct(
     sol_kwargs = (; save_everystep = false, alg = VCABM(), sensealg = BacksolveAdjoint(; autojacvec = ZygoteVJP())),
 )
 
+# Initialise parameters and states
 ps, st = Lux.setup(Random.default_rng(), icnf)
 ps = gdev(ComponentArray(ps))
 st = gdev(st)
 
-# --- 4. LOSS FUNCTION ---
+# FFJORD loss function
 function ffjord_loss(xs, ys, ps_current, zrs, ϵ)
     nn_cond = ContinuousNormalizingFlows.CondLayer(icnf.nn, ys)
     prob = SciMLBase.ODEProblem(SciMLBase.ODEFunction((u, p, t) -> ContinuousNormalizingFlows.augmented_f(u, p, t, icnf, TrainMode(), nn_cond, st, ϵ)), vcat(xs, zrs), icnf.tspan, ps_current)
@@ -110,7 +124,8 @@ function ffjord_loss(xs, ys, ps_current, zrs, ϵ)
     return -mean(logp̂x)
 end
 
-# --- 5. TRAINING SETUP ---
+# Set up training 
+# Included decaying learning rate 
 batchsize = 64
 initial_lr = 1e-4
 scheduler = Exp(initial_lr, 0.999) 
@@ -120,8 +135,8 @@ opt_state = Optimisers.setup(opt, ps)
 checkpoint_dir = "model_cnn_checkpoints_12"
 mkpath(checkpoint_dir)
 
-# --- 6. TRAINING LOOP  ---
-@info "Starting training..."
+# Training Loop
+#@info "Training started" # Just to see if its working 
 n_epochs = 5000 
 
 for epoch in 1:n_epochs
@@ -137,23 +152,23 @@ for epoch in 1:n_epochs
     for i in 1:num_batches
         batch_indices = shuffled_indices[((i-1)*batchsize + 1):min(i*batchsize, n)]
         current_batch_size = length(batch_indices)
-        
+        # Prepare a batch of images for augmentation
         x_batch_cpu = Array{Float32}(undef, n_image, current_batch_size)
 
         for (j, idx) in enumerate(batch_indices)
             img = load_and_crop_image(joinpath(img_dir, img_files[idx]))
             
-            # --- MANUAL AUGMENTATION BLOCK ---
+            # Augmentation block
             if rand() < 0.5
                 img = reverse(img; dims=2)
             end
             angle = deg2rad(rand(-10:10))
             img_rotated = ImageTransformations.imrotate(img, angle, fill=0)
+            # Crop to original size after rotation
             h_rot, w_rot = size(img_rotated)
             h_start = (h_rot - H) ÷ 2 + 1
             w_start = (w_rot - W) ÷ 2 + 1
             img_final = img_rotated[h_start:(h_start + H - 1), w_start:(w_start + W - 1)]
-            # --- END OF BLOCK ---
             
             img_array_hwc = permutedims(channelview(img_final), (2, 3, 1))
             x_batch_cpu[:, j] = vec(Float32.(img_array_hwc))
@@ -161,7 +176,7 @@ for epoch in 1:n_epochs
 
         x_batch_normalized = (x_batch_cpu .- data_mean) ./ data_std
         y_batch_cpu = reshape(alpha_values[batch_indices], 1, :)
-        
+        # Move to GPU
         x_gpu = gdev(x_batch_normalized)
         y_gpu = gdev(y_batch_cpu)
 
@@ -181,7 +196,7 @@ for epoch in 1:n_epochs
         local st_cpu = cpu_dev(st)
         save_path = joinpath(checkpoint_dir, "model_cnn_epoch_$(epoch).jld2")
         jldsave(save_path; ps=ps_cpu, st=st_cpu, H=H, W=W, C=C, data_mean=data_mean, data_std=data_std)
-        @info "Saved checkpoint to $save_path"
+        @info "Saved/$save_path"
     end
 end
 
