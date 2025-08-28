@@ -1,4 +1,5 @@
 ### Nodal Surface Visualizer (Julia Script)
+# Edited version of Jarvist Frost's code added loop to produce more images 
 using LinearAlgebra, Images, FileIO, ImageMagick, Printf
 using DataFrames, CSV, Logging
 
